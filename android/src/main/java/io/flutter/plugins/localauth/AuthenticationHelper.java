@@ -13,6 +13,7 @@ import android.content.Context;
 import android.content.DialogInterface;
 import android.content.DialogInterface.OnClickListener;
 import android.content.Intent;
+import android.hardware.biometrics.BiometricPrompt;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -36,6 +37,8 @@ import io.flutter.plugin.common.MethodCall;
  */
 class AuthenticationHelper extends FingerprintManagerCompat.AuthenticationCallback
     implements Application.ActivityLifecycleCallbacks {
+
+  private boolean activityPaused = false;
 
   /** How long will the fp dialog be delayed to dismiss. */
   private static final long DISMISS_AFTER_MS = 300;
@@ -94,9 +97,10 @@ class AuthenticationHelper extends FingerprintManagerCompat.AuthenticationCallba
   }
 
   void authenticate() {
-    if (fingerprintManager.isHardwareDetected()) {
+    start();
+    /*if (fingerprintManager.isHardwareDetected()) {
       if (keyguardManager.isKeyguardSecure() && fingerprintManager.hasEnrolledFingerprints()) {
-        start();
+
       } else {
         if (call.argument("useErrorDialogs")) {
           showGoToSettingsDialog();
@@ -110,7 +114,7 @@ class AuthenticationHelper extends FingerprintManagerCompat.AuthenticationCallba
       }
     } else {
       completionHandler.onError("NotAvailable", "Fingerprint is not available on this device.");
-    }
+    }*/
   }
 
   /** Cancels the fingerprint authentication. */
@@ -130,6 +134,7 @@ class AuthenticationHelper extends FingerprintManagerCompat.AuthenticationCallba
   }
 
   private void pause() {
+
     if (cancellationSignal != null) {
       cancellationSignal.cancel();
     }
@@ -160,6 +165,7 @@ class AuthenticationHelper extends FingerprintManagerCompat.AuthenticationCallba
   @Override
   public void onActivityPaused(Activity activity) {
     if (call.argument("stickyAuth")) {
+      activityPaused = true;
       pause();
     } else {
       stop(false);
@@ -169,12 +175,48 @@ class AuthenticationHelper extends FingerprintManagerCompat.AuthenticationCallba
   @Override
   public void onActivityResumed(Activity activity) {
     if (call.argument("stickyAuth")) {
+      activityPaused = false;
       resume();
     }
   }
 
   @Override
-  public void onAuthenticationError(int errMsgId, CharSequence errString) {
+  public void onAuthenticationError(int errorCode, CharSequence errString) {
+    switch (errorCode) {
+      case BiometricPrompt.BIOMETRIC_ERROR_NO_SPACE:
+      case BiometricPrompt.BIOMETRIC_ERROR_NO_BIOMETRICS:
+        if (call.argument("useErrorDialogs")) {
+          showGoToSettingsDialog();
+          return;
+        }
+        completionHandler.onError("NotEnrolled", "No Biometrics enrolled on this device.");
+        break;
+      case BiometricPrompt.BIOMETRIC_ERROR_HW_UNAVAILABLE:
+      case BiometricPrompt.BIOMETRIC_ERROR_HW_NOT_PRESENT:
+        completionHandler.onError("NotAvailable", "Biometrics is not available on this device.");
+        break;
+      case BiometricPrompt.BIOMETRIC_ERROR_LOCKOUT:
+        completionHandler.onError(
+                "LockedOut",
+                "The operation was canceled because the API is locked out due to too many attempts. This occurs after 5 failed attempts, and lasts for 30 seconds.");
+        break;
+      case BiometricPrompt.BIOMETRIC_ERROR_LOCKOUT_PERMANENT:
+        completionHandler.onError(
+                "PermanentlyLockedOut",
+                "The operation was canceled because ERROR_LOCKOUT occurred too many times. Biometric authentication is disabled until the user unlocks with strong authentication (PIN/Pattern/Password)");
+        break;
+      case BiometricPrompt.BIOMETRIC_ERROR_CANCELED:
+        // If we are doing sticky auth and the activity has been paused,
+        // ignore this error. We will start listening again when resumed.
+        if (activityPaused && call.hasArgument("stickyAuth")) {
+          return;
+        } else {
+          completionHandler.onFailure();
+        }
+        break;
+      default:
+        completionHandler.onFailure();
+    }
     updateFingerprintDialog(DialogState.FAILURE, errString.toString());
   }
 
