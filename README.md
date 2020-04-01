@@ -157,3 +157,4 @@ if the user receives a phone call before they get a chance to authenticate. With
 `stickyAuth` set to false, this would result in plugin returning failure result
 to the Dart app. If set to true, the plugin will retry authenticating when the
 app resumes.
+#test
